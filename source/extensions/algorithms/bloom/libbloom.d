@@ -28,7 +28,17 @@ package double _p (T,U) (T n, U k, double m) {
   import std.math: log, pow, exp, E;
   return pow(1.0 - pow(E,(k*n/m)*-1.0), k);
 }
-
+//* reduce ubyte[] to decimal (ulong)
+package ulong bitsToNumber (ubyte[] u) {
+  ulong a;
+  auto i = 0;
+  while (i<u.length) {
+    a |= (u[i] & 0xff) << 8*(u.length-i-1);
+    i++;
+  }
+  return a;
+}
+/** **/
 ubyte[] md5 (T) (T s) {
   import std.digest.md;
   import std.array: array;
@@ -37,11 +47,13 @@ ubyte[] md5 (T) (T s) {
   md.put(cast(ubyte[])s);
   return md.finish.array;
 }
+/** **/
 unittest {
   assert (md5("horse").length != 0);
   assert (md5("rat") == md5("rat"));
   assert (md5("cat") != md5("dog"));
 }
+/** **/
 ubyte[] murmur (T) (T s) {
   import std.digest.murmurhash;
   import std.array: array;
@@ -50,6 +62,7 @@ ubyte[] murmur (T) (T s) {
   murmur.put(cast(ubyte[])s);
   return murmur.finish.array;
 }
+/** **/
 unittest {
   assert (murmur("kipepeo") == murmur("kipepeo"));
   assert (murmur("hippo") != murmur("lion"));
@@ -62,11 +75,11 @@ ubyte[] crc (T) (T s) {
   crc.put(cast(ubyte[])s);
   return crc.finish.array;
 }
+/** **/
 unittest {
   assert (crc("snake") == crc("snake"));
   assert (crc("parrot") != crc("sparrow"));
 }
-
 unittest {
   assert(md5("turtle") != murmur("turtle"));
   assert(murmur("turtle") != crc("turtle"));
