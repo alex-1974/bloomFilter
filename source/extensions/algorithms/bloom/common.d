@@ -1,27 +1,26 @@
-/** **/
+/**
+**/
 module extensions.algorithms.bloom.common;
 
 import extensions.algorithms.bloom.libbloom;
 
-/**
-class vs struct
-Structs are value-typed therefore faster than the referenced-type classes
-for the hash functions:
-* collisions don't really matter too timeStatusChanged
-* it's more important that they are evenly and randomly distributed
-* fast
-* To get a single number from the hash we reduce the hash to a single decimal number
-* and take the modulo from the bit array length
-how many hash functions?
-* The more, the slower the bloom filter, and the quicker it fills up. Too few may suffer from too many false positiv.
-how many bits in array?
-* A larger filter will have less false positives
-* See:
-* <a href="http://matthias.vallentin.net/blog/2011/06/a-garden-variety-of-bloom-filters/">A garden variety of bloom filters</a>
-**/
-
 debug { import std.stdio; }
 
+auto basicBloomFilter () {}
+
+auto a2BloomFilter (size_t capacity, double fp) () {
+  double requiredCells = _m(capacity, fp);
+  double optimalK = _k(capacity, requiredCells);
+  writefln ("required cells %s optimal k %s", requiredCells, optimalK);
+  return "";
+}
+unittest {
+  auto a2 = a2BloomFilter!(1000, 0.01)();
+}
+
+
+
+version(old) {
 /** **/
 class baseBloom (T) {
   import std.range: InputRange;
@@ -92,43 +91,14 @@ class DoubleBloom (T) : baseBloom!T {
 unittest {
   size_t elements = 1000;
   size_t hashes = 7;
-  auto hashFuncs = [&md5!string,&murmur!string];
-  auto bf = new DoubleBloom!string(elements,hashes, &md5!string,&murmur!string);
+  auto hashFuncs = [&md5,&murmur];
+  auto bf = new DoubleBloom!string(elements,hashes, &md5,&murmur);
   bf.add("cat");
   writefln ("check cat: %s", bf.check("cat"));
   writefln ("check dog: %s", bf.check("dog"));
 }
+} // end version(old)
 
-alias hashFunc(T) = ubyte[] function(T);
-/** **/
-auto doubleBloom (T) (bool[] bitArray, size_t numberOfHashFunc, hashFunc!T fun, hashFunc!T fun2) {
-  auto r = new DoubleBloom!T(bitArray.length, numberOfHashFunc, fun,fun2);
-  r.setFilterArray(bitArray);
-}
-/** **/
-auto doubleBloom (T) (size_t elements, double falsePositive, hashFunc!T fun, hashFunc!T fun2) {
-  auto b = numberOfBits(elements, falsePositive);
-  auto r = new DoubleBloom!T(b,numberOfHashFunctions(elements, b), fun,fun2);
-  return r;
-}
-/** **/
-unittest {
-  size_t elements = 1000;
-  double probability = 0.01;
-  auto db = doubleBloom!string(elements, probability, &md5!string, &murmur!string);
-  // add values to the filter
-  db.add("cat");
-  db.add("dog", "zebra");
-  db.add(["turtle", "parrot"]);
-  // check if values are in the filter
-  assert(db.check("cat"));
-  // if more than one value is given to check, all of them must be found to return true
-  assert(db.check("dog", "zebra"));
-  assert(!db.check("snake", "zebra"));
-}
-class A2Bloom (T) : baseBloom!T {
-  bool[] bitArray2;
-}
 //* reduce ubyte[] to decimal (ulong)
 private ulong bitsToNumber (ubyte[] u) {
   ulong a;

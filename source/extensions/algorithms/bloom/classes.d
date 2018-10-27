@@ -11,20 +11,20 @@ enum engine {
 }
 
 /** Interface for bloom filter (the base class) **/
-interface bloomFilter (T, engine e = engine.doubleHash) {
-  void add (T value);
-  bool query (T value);
+interface bloomFilter {
+  void add (T) (T value);
+  bool query (T) (T value);
   void clear ();
 }
 
 /** Basic bloom filter **/
-final class basicFilter (T, size_t size, engine e = engine.doubleHash) : bloomFilter!T {
+final class basicFilter (size_t size, engine e = engine.doubleHash) : bloomFilter {
   Storage!(bool,size) storage;
-  override void add (T value) { hashEngine(value); }
-  override bool query (T value) { return true; }
+  override void add (T) (T value) { hashEngine(value); }
+  override bool query (T) (T value) { return true; }
   override void clear () { storage.clear; }
-  static if (e == engine.singleHash) { mixin singleHashEngine!T; }
-  else { mixin doubleHashEngine!T; }
+  static if (e == engine.singleHash) { mixin singleHashEngine; }
+  else { mixin doubleHashEngine; }
   size_t m (double fp, size_t capacity) { return size_t.init; }
   size_t k (size_t cells, size_t capacity) { return size_t.init; }
 }
@@ -40,37 +40,43 @@ unittest {
  *
  * A fifo-like, active-active buffering bloom filter.
  **/
-final class a2Filter (T, size_t length, engine e = engine.doubleHash) : bloomFilter!T {
-  alias hash = ubyte[] function(T);
-  Storage!(bool,length)[2] storage;
-  @property size () { return length; }
+final class a2Filter (size_t capacity, size_t cells, size_t k, engine e = engine.doubleHash) : bloomFilter {
+  size_t _capacity = capacity;
+  size_t _cells = cells;
+  alias hash = ubyte[] function (ubyte[]);
+  Storage!(bool,cells)[2] storage;
+  @property size () { return _cells; }
   static if (e == engine.singleHash) {
     hash[] hashes;  // dynamic array
     this (hash[] f...) { hashes ~= f; }
-    mixin singleHashEngine!T;
+    mixin singleHashEngine;
   }
   else {
     hash[2] hashes; // static array
     this (hash f1, hash f2) { hashes = [f1,f2]; }
-    mixin doubleHashEngine!T;
+    mixin doubleHashEngine;
   }
-
-  override void add (T value) {
+  void test (U) (U data) {
+    writefln("data: %s", data);
+  }
+  void add (T) (T value) {
     import std.range: tee, array;
     // in a2 we always set in storage[0]
-    hashEngine(value).tee!(a => storage[0].set(a, true)).array;
+    hashEngine(cast(ubyte[])value).tee!(a => storage[0].set(a, true)).array;
   }
-  override bool query (T value) { return true; }
+  override bool query (T) (T value) pure nothrow @safe @nogc { return true; }
   override void clear () { foreach (s; storage) { s.clear; } }
 }
 unittest {
   // static hashes
-  auto a2 = new a2Filter!(string, 10)(&md5!string, &murmur!string);
-  assert (a2.storage.length == 2 && a2.storage[0].array.length == 10);
+  auto a2 = new a2Filter!(10, 15, 6)(&md5, &murmur);
+  assert (a2.storage.length == 2 && a2.storage[0].array.length == 15);
+  a2.add("cat");
+  a2.test!int(5);
 }
 unittest {
   // dynamic hashes
-  auto a2 = new a2Filter!(string, 10, engine.singleHash)(&md5!string, &murmur!string);
+  auto a2 = new a2Filter!(10, 15, 6, engine.singleHash)(&md5, &murmur);
 }
 //final class spectralRMFilter : bloomFilter {}
 
@@ -80,7 +86,10 @@ unittest {
 
 //final class stableFilter : countingFilter {}
 
-/** Stores the underlying array **/
+/** Stores the underlying array
+ *
+ * Static initialized with type and size.
+ **/
 struct Storage (T, size_t length) {
   T[length] array;  // static array of type T
   @property size () { return length; }
@@ -99,10 +108,12 @@ unittest {
   auto s = Storage!(bool,10)();
   assert(s.array.length == 10);
   s.set(0, true);
+  assert(s.get(0));
 }
 /** **/
-mixin template singleHashEngine (T) {
-  private InputRange!size_t hashEngine (T value) {
+mixin template singleHashEngine () {
+  /** **/
+  private InputRange!size_t hashEngine (ubyte[] value) {
     import std.range: iota, inputRangeObject;
     import std.algorithm: map;
     return hashes.map!(a => (a(value).bitsToNumber) % size).inputRangeObject;
@@ -110,13 +121,13 @@ mixin template singleHashEngine (T) {
 }
 
 /** **/
-mixin template doubleHashEngine (T) {
-  private InputRange!size_t hashEngine (T value) {
+mixin template doubleHashEngine () {
+  /** **/
+  private InputRange!size_t hashEngine (ubyte[] value) {
     import std.range: iota, inputRangeObject;
     import std.algorithm: map;
     auto h1 = hashes[0](value).bitsToNumber;
     auto h2 = hashes[1](value).bitsToNumber;
     return iota(0,10).map!(a => (h1 + a * h2) % size).inputRangeObject;
-    //return [];
   }
 }
