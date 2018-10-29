@@ -77,7 +77,7 @@ deprecated ("use the one from conv.bits!") package ulong bitsToNumber (ubyte[] u
   return a;
 }
 /** **/
-ubyte[] md5 (ubyte[] s) @system pure nothrow {
+ubyte[] md5 (ubyte[] s...) @system pure nothrow {
   import std.digest.md;
   import std.array: array;
   MD5 md;
@@ -92,7 +92,7 @@ ubyte[] md5 (ubyte[] s) @system pure nothrow {
   assert (md5(cast(ubyte[])"cat") != md5(cast(ubyte[])"dog"));
 }
 /** **/
-ubyte[] murmur (ubyte[] s) @system pure nothrow {
+ubyte[] murmur (ubyte[] s...) @system pure nothrow {
   import std.digest.murmurhash;
   import std.array: array;
   MurmurHash3!32 murmur;

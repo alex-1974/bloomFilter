@@ -3,19 +3,21 @@
 module extensions.algorithms.bloom.common;
 
 import extensions.algorithms.bloom.libbloom;
+import extensions.algorithms.bloom.classes;
 
 debug { import std.stdio; }
 
 auto basicBloomFilter () {}
 
+/** **/
 auto a2BloomFilter (size_t capacity, double fp) () {
-  double requiredCells = _m(capacity, fp);
-  double optimalK = _k(capacity, requiredCells);
+  enum size_t requiredCells = numberOfBits(capacity, fp);
+  enum size_t  optimalK = numberOfHashFunctions(capacity, requiredCells);
   writefln ("required cells %s optimal k %s", requiredCells, optimalK);
-  return "";
+  return new a2Filter!(capacity, requiredCells)(optimalK, &md5, &murmur);
 }
 unittest {
-  auto a2 = a2BloomFilter!(1000, 0.01)();
+  //auto a2 = a2BloomFilter!(10, 0.01);
 }
 
 
@@ -120,13 +122,13 @@ private ulong bitsToNumber (ubyte[] u) {
  **/
 ulong numberOfBits (T) (T elements, double probability) pure nothrow @safe @nogc {
   import std.math: ceil;
-  return cast(ulong)( ceil( _m(elements,probability)) );
+  return cast(size_t)( ceil( _m(elements,probability)) );
 }
 
 /** Returns number of hash functions needed **/
 ulong numberOfHashFunctions (T,U) (T elements, U bits) pure nothrow @safe @nogc {
   import std.math: round;
-  return cast(ulong)round( _k(elements, bits));
+  return cast(size_t)round( _k(elements, bits));
 }
 /** Number of elements, that can be inserted **/
 ulong numberOfElements (T,U) (T bits, U hashes, double probability) pure nothrow @safe @nogc {
