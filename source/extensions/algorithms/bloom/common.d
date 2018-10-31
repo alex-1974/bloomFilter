@@ -7,7 +7,8 @@ import extensions.algorithms.bloom.classes;
 
 debug { import std.stdio; }
 
-auto basicBloomFilter () {}
+/** **/
+auto basicBloomFilter (size_t capacity, double fp) () {}
 
 /** **/
 auto a2BloomFilter (size_t capacity, double fp) () {
@@ -16,11 +17,15 @@ auto a2BloomFilter (size_t capacity, double fp) () {
   writefln ("required cells %s optimal k %s", requiredCells, optimalK);
   return new a2Filter!(capacity, requiredCells)(optimalK, &md5, &murmur);
 }
+/** **/
 unittest {
   //auto a2 = a2BloomFilter!(10, 0.01);
 }
 
+/** **/
+auto countingBloomFilter (size_t capacity, double fp) () {
 
+}
 
 version(old) {
 /** **/

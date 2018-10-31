@@ -18,13 +18,15 @@ interface bloomFilter {
   bool query (T) (T value);
   /** **/
   void clear ();
+  /** **/
+  size_t size ();
 }
 
 /** Basic bloom filter **/
 final class basicFilter (size_t cells, engine e = engine.doubleHash) : bloomFilter {
-  Storage!(bool,cells) storage;
+  bitStorage!(cells) storage;
   const size_t _cells = cells;
-  @property size () const { return _cells; }
+  size_t size () const { return _cells; }
   alias hash = ubyte[] function (ubyte[]...);
 
   static if (e == engine.singleHash) {
@@ -72,12 +74,12 @@ unittest {
  **/
 final class a2Filter (size_t capacity, size_t cells, engine e = engine.doubleHash) : bloomFilter {
   const size_t _capacity = capacity;   // maximum number of items in the active bloom filter
-  size_t _items = 0;             // number of items in the active bloom filter
+  size_t _items = 0;                   // number of items in the active bloom filter
   const size_t _cells = cells;         // the number of cells for the Bloom filter
   alias hash = ubyte[] function (ubyte[]...);
-  Storage!(bool,cells)[2] storage;  // the underlying storage as static array
+  bitStorage!(cells)[2] storage;  // the underlying storage as static array
   /** Get the size of the Bloom filter **/
-  @property size () const { return _cells; }
+  size_t size () const { return _cells; }
   static if (e == engine.singleHash) {
     hash[] hashes;  // dynamic array
     /** **/
@@ -191,63 +193,242 @@ unittest {
 }
 //final class spectralRMFilter : bloomFilter {}
 
-//class countingFilter : bloomFilter {}
+/** **/
+class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash): bloomFilter {
+  private enum size_t _cells = cells;           // the number of cells for the Bloom filter
+  private enum size_t _width = width;           // the size of the buckets
+  private enum size_t _length = _cells*_width;  // the total size of the filter
+  private bool _dirty = false;                  // the filter is dirty if over- or underflows occured
+  private bitStorage!(_length) storage;         // the underlying storage
+  alias hash = ubyte[] function (ubyte[]...);
+  /** Return size of filter **/
+  @property size_t size () const { return _cells; }
+  /** Check if filter got compromised **/
+  @property bool dirty () const { return _dirty; }
+  static if (e == engine.singleHash) {
+    hash[] hashes;  // dynamic array
+    /** **/
+    this (hash[] f...) { hashes ~= f; }
+    mixin singleHashEngine;
+  }
+  else static if (e == engine.doubleHash) {
+    hash[2] hashes; // static array
+    size_t _k;
+    /** Return number of hash functions **/
+    @property functions () const { return _k; }
+    /** **/
+    this (size_t k, hash f1, hash f2) { this._k = k; hashes = [f1,f2]; }
+    mixin doubleHashEngine!_k;
+  }
+  invariant {
+    assert(_width < _cells, "Does it make sense if cells < width?");
+    assert(0 < _length && _length < size_t.max, "Storage without length or storage bigger than the maximum of size_t!");  // we use size_t as index of the bitArray
+    assert(hashes.length > 0, "No hash functions given!");
+  }
+  /** Adding items to the filter
+   *
+   * If a bucket value reaches 2<sup>w</sup>-1 it cannot be incremented further.
+   * This introduces undercounts with the probability of <em>false negative errors</em>.
+   **/
+  void add (T) (T value) @system {
+    import std.range;
+    import std.algorithm;
+    hashEngine(value.toUbyte).map!(a => increment(a)).array;
+  }
+  /** Remove item from the filter
+   *
+   * As long as the filter is not <em>dirty</em> (no overflow occured yet) removing items is safe.
+   * If the filter is dirty, removings introduce the possibility of <em>false negative errors</em>.
+   **/
+  void remove (T) (T value) @system {
+    import std.range;
+    import std.algorithm;
+    auto h = hashEngine(value.toUbyte).save;
+    // check if value can be found in filter
+    // we can't remove, what we didn't insert beforehand
+    //if (h.map!(a => getBucket(a).any!"a == true").all!"a == true") {
+    if (h.map!(a => count(a)).minElement) { h.each!(a => decrement(a)); }
+  }
+  /** Query the item
+   *
+   * Returns the minimum value as frequency estimate (known as minimum selection)
+   **/
+  size_t query (T) (T value) @system {
+    import std.range;
+    import std.algorithm;
+    return hashEngine(value.toUbyte)
+            .map!(a => count(a))
+            .minElement;
+  }
+  /** Clear the filter **/
+  void clear() pure nothrow @safe @nogc {
+    storage.clear;
+    _dirty = false;
+  }
+  /** Gives the index of the first bit in the bucket **/
+  private size_t index (size_t cell) const pure nothrow @safe @nogc
+  in {
+    assert (cell <= _cells);
+  }
+  body { return cell * _width; }
 
+  /** **/
+  private size_t count (size_t cell)
+  in {
+    assert (cell <= _cells);
+  }
+  body {
+    return sumBits(getBucket(cell));
+  }
+
+  /** Increment the bucket **/
+  private bool increment (size_t cell) @safe pure nothrow
+  in {
+    assert (cell <= _cells);
+  }
+  body {
+    import std.range: array;
+    enum bool[_width] alignedOne = [(_width-1):1];
+    enum bool[_width] alignedFull = true;
+    if (getBucket(cell).array == alignedFull) {
+      // just a shortcut if bucket is already full
+      _dirty = true;
+      return false;
+    }
+    else {
+      bool[] result;
+      addition(getBucket(cell).array, alignedOne, result);
+      setBucket(cell,result);
+      return true;
+    }
+  }
+  /** Decrement the bucket **/
+  private bool decrement (size_t cell) @safe pure nothrow
+  in {
+    assert (cell <= _cells);
+  }
+  body {
+    import std.range;
+    enum bool[_width] alignedComplement = true;
+    enum bool[_width] alignedEmpty = false;
+    // shortcut if bucket is already empty
+    if (getBucket(cell).array == alignedEmpty) {
+      _dirty = true;
+      return false;
+    }
+    bool[] result;
+    addition(getBucket(cell).array, alignedComplement, result);
+    setBucket(cell, result);
+    // we don't care about overflows
+    return true;
+  }
+  /** Get bucket **/
+  private auto getBucket (size_t cell) const pure nothrow @safe
+  in {
+    assert (cell <= _cells);
+  }
+  out (result) {
+    assert(result.length == _width);
+  }
+  body {
+    auto i = index(cell);
+    import std.range: iota, array;
+    import std.algorithm: map;
+    return iota(i, i+_width).map!(a => storage.get(a)).array;
+  }
+  /** Set bucket **/
+  private void setBucket (size_t cell, bool value) pure nothrow @safe @nogc
+  in {
+    assert (cell <= _cells);
+  }
+  body {
+    import std.range: iota;
+    import std.algorithm: each;
+    iota(0,_width).each!(a => storage.set(index(cell)+a,value));
+  }
+  /** ditto **/
+  private void setBucket (size_t cell, bool[] value) pure nothrow @safe @nogc
+  in {
+    assert (value.length == _width);
+    assert (cell <= _cells);
+  }
+  body {
+    import std.range: iota;
+    import std.algorithm: each;
+    iota(0,_width).each!(a => storage.set(index(cell)+a,value[+a]));
+  }
+  unittest {
+    auto cf = new countingFilter!(10,4)(2, &md5, &murmur);
+    cf.setBucket(1, [0,1,1,1]);
+  }
+} // end class countingFilter
+
+/** **/
+unittest {
+  auto cf = new countingFilter!(10,4)(2, &md5, &murmur);
+  cf.add("butterfly");
+  assert(cf.query("butterfly"));
+  assert(!cf.query("dog"));
+  cf.remove("butterfly");
+  assert(!cf.dirty);
+  assert(!cf.query("butterfly"));
+  cf.clear;
+  cf.add("eagle");
+  cf.add("eagle");
+  assert(cf.query("eagle") == 2);
+  cf.remove("eagle");
+  assert(cf.query("eagle") == 1);
+}
 //final class spectralMIFilter : countingFilter {}
 
 //final class stableFilter : countingFilter {}
 
 /** Stores the underlying array
  *
- * Static initialized with type and size.
+ * Static initialized with size.
  **/
-struct Storage (T, size_t length) {
-  private T[length] array;  // static array of type T
+struct bitStorage (size_t cells) {
+  private bool[cells] array;  // static array of type T
   //alias array this;
-  @property size () const { return length; }
-  void set (size_t cell, T value) { array[cell] = value; }
-  T get (const size_t cell) const { return array[cell]; }
+  @property size () const pure nothrow @safe @nogc { return cells; }
+  void set (size_t cell, bool value) pure @safe nothrow @nogc { array[cell] = value; }
+  bool get (const size_t cell) const pure @safe nothrow @nogc { return array[cell]; }
   // clear array to init value
-  void clear () pure @safe nothrow @nogc { array[] = T.init; }
-  // increment and decrement only if T supports it (bool doesn't support this!)
-  static if (__traits(compiles, { T i; i++; } )) {
-    void increment (size_t cell, size_t value) { array[cell] += value; }
-    void decrement (size_t cell, size_t value) { array[cell] -= value; }
-  }
-  void swap (ref Storage y) pure nothrow @nogc { import std.algorithm: swap; swap(this.array,y.array);
-
+  void clear () pure @safe nothrow @nogc { array[] = bool.init; }
+  void swap (ref bitStorage y) pure nothrow @nogc { import std.algorithm: swap; swap(this.array,y.array); }
+  invariant {
+    assert(array.length > 0);
   }
 } // end struct Storage
 /** **/
 unittest {
   import std.traits;
-  auto s = Storage!(bool,10)();
+  auto s = bitStorage!(10)();
   assert(s.array.length == 10);
   s.set(0, true);
   assert(s.get(0));
-  auto t = Storage!(bool,10)();
+  auto t = bitStorage!(10)();
   s.swap(t);
   assert(t.get(0));
 }
 unittest {
   import std.range;
   import std.algorithm;
-  auto a = Storage!(bool, 10)();
-  auto b = Storage!(bool, 10)();
+  auto a = bitStorage!(10)();
+  auto b = bitStorage!(10)();
   iota(0,10).filter!(i => i % 2).tee!(i => a.set(i,true)).array;
   iota(0,10).filter!(i => !(i % 2)).tee!(i => b.set(i,true)).array;
   a.swap(b);
   assert(a.get(0) == true && b.get(0) == false);
 }
-import extensions.ranges: rank, flatten;
 
-private auto toUbyte (T) (T[] value...) {
+private auto toUbyte (T) (T[] value...) pure nothrow {
   import std.array;
   import std.algorithm;
   return value.map!(a => a.toUbyte).array;
 }
 /** **/
-private auto toUbyte (T) (T value) {
+private auto toUbyte (T) (T value) pure nothrow  {
   import std.traits;
   static if (isArray!T) { return cast(ubyte[])value; }
   else { return cast(ubyte)value; }
@@ -265,22 +446,22 @@ unittest {
 /** **/
 mixin template singleHashEngine () {
   /** **/
-  private InputRange!size_t hashEngine (ubyte[] value...) pure nothrow @safe
+  private size_t[] hashEngine (ubyte[] value...) @system
   body {
-    import std.range: iota, inputRangeObject;
+    import std.range: iota, array;
     import std.algorithm: map;
-    return hashes.map!(a => (a(value).bitsToNumber) % size).inputRangeObject;
+    return hashes.map!(a => (a(value).bitsToNumber) % size).array;
   }
 }
 
 /** **/
 mixin template doubleHashEngine (alias size_t k) {
   /** **/
-  private InputRange!size_t hashEngine (ubyte[] value...) @system {
-    import std.range: iota, inputRangeObject;
+  private size_t[] hashEngine (ubyte[] value...) @system {
+    import std.range: iota, array;
     import std.algorithm: map;
     const auto h1 = hashes[0](value).bitsToNumber;
     const auto h2 = hashes[1](value).bitsToNumber;
-    return iota(0,k).map!(a => (h1 + a * h2) % size).inputRangeObject;
+    return iota(0,k).map!(a => (h1 + a * h2) % size).array;
   }
 }
