@@ -4,6 +4,7 @@ module extensions.algorithms.bloom.classes;
 import std.range: InputRange;
 import extensions.algorithms.bloom.libbloom;
 debug { import std.stdio; }
+
 /** **/
 enum engine {
   singleHash,   /// Use only given hash functions
@@ -42,20 +43,28 @@ final class basicFilter (size_t cells, engine e = engine.doubleHash) : bloomFilt
     this (size_t k, hash f1, hash f2) { this._k = k; hashes = [f1,f2]; }
     mixin doubleHashEngine!_k;
   }
+
+  /** **/
   void add (T) (T value) {
     import std.range: tee, array;
     hashEngine(value.toUbyte).tee!(a => storage.set(a, true)).array;
   }
+
+  /** **/
   bool query (T) (T value) {
     import std.algorithm: map, all;
     return hashEngine(value.toUbyte).map!(a => (storage.get(a))).all!"a == true";
   }
+
+  /** **/
   override void clear () { storage.clear; }
+
   size_t m (double fp, size_t capacity) { return size_t.init; }
   size_t k (size_t cells, size_t capacity) { return size_t.init; }
 }
+/** **/
 unittest {
-  auto bf = new basicFilter!(50)(2, &md5, &murmur);
+  auto bf = new basicFilter!(25)(2, &md5, &murmur);
   bf.add("cat");
   assert(bf.query("cat"));
   assert(!bf.query("dog"));
@@ -119,12 +128,20 @@ final class a2Filter (size_t capacity, size_t cells, engine e = engine.doubleHas
     storage[1].clear;
     storage[0].swap(storage[1]);
   }
-  /** **/
+  /** Check if value is in the filter
+   *
+   * If not found in the filter, the term has never been added for sure. If found
+   * there is a chance for a false-positive.
+   * If more than one term is queried for, all of them must match to return true.
+   * Params:
+   *  value = term to search for
+   * Returns: Returns false if value is for sure not in the filter, otherwise false.
+   **/
   bool query (T) (T[] value...) @system {
     import std.algorithm: map, all;
     return value.map!(a => query(a)).all!"a == true"; // all values must be found to return true
   }
-  /** **/
+  /** ditto **/
   bool query (T) (T value) @system {
     import std.traits: isArray;
     import std.algorithm: map, all;
@@ -191,6 +208,7 @@ unittest {
   writefln ("storage 0: %s", a2.storage[0]);
   writefln ("storage 1: %s", a2.storage[1]);
 }
+
 //final class spectralRMFilter : bloomFilter {}
 
 /** **/
@@ -225,21 +243,28 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
     assert(0 < _length && _length < size_t.max, "Storage without length or storage bigger than the maximum of size_t!");  // we use size_t as index of the bitArray
     assert(hashes.length > 0, "No hash functions given!");
   }
+
   /** Adding items to the filter
    *
    * If a bucket value reaches 2<sup>w</sup>-1 it cannot be incremented further.
    * This introduces undercounts with the probability of <em>false negative errors</em>.
    **/
+   /** **/
+  void add (T) (T[] value...) { foreach (v; value) { add(v); } }
+  /** ditto **/
   void add (T) (T value) @system {
     import std.range;
     import std.algorithm;
     hashEngine(value.toUbyte).map!(a => increment(a)).array;
   }
+
   /** Remove item from the filter
    *
    * As long as the filter is not <em>dirty</em> (no overflow occured yet) removing items is safe.
    * If the filter is dirty, removings introduce the possibility of <em>false negative errors</em>.
    **/
+  void remove (T) (T[] value...) { foreach (v; value) { remove(v); } }
+  /** ditto **/
   void remove (T) (T value) @system {
     import std.range;
     import std.algorithm;
@@ -249,13 +274,20 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
     //if (h.map!(a => getBucket(a).any!"a == true").all!"a == true") {
     if (h.map!(a => count(a)).minElement) { h.each!(a => decrement(a)); }
   }
+
   /** Query the item
    *
+   * Check if the term is within the filter.
+   * If more than ne term is searched for returns the minimum of all terms.
    * Returns the minimum value as frequency estimate (known as minimum selection)
    **/
+  size_t[] query (T) (T[] value...) {
+    import std.algorithm: minElement, map;
+    return value.map!(a => query(a)).minElement;
+   }
+  /** ditto **/
   size_t query (T) (T value) @system {
-    import std.range;
-    import std.algorithm;
+    import std.algorithm: minElement, map;
     return hashEngine(value.toUbyte)
             .map!(a => count(a))
             .minElement;
@@ -267,25 +299,17 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
   }
   /** Gives the index of the first bit in the bucket **/
   private size_t index (size_t cell) const pure nothrow @safe @nogc
-  in {
-    assert (cell <= _cells);
-  }
+  in { assert (cell <= _cells); }
   body { return cell * _width; }
 
-  /** **/
-  private size_t count (size_t cell)
-  in {
-    assert (cell <= _cells);
-  }
-  body {
-    return sumBits(getBucket(cell));
-  }
+  /** Sums up the bits in the bucket **/
+  private size_t count (size_t cell) pure nothrow @safe
+  in { assert (cell <= _cells); }
+  body { return sumBits(getBucket(cell)); }
 
   /** Increment the bucket **/
   private bool increment (size_t cell) @safe pure nothrow
-  in {
-    assert (cell <= _cells);
-  }
+  in { assert (cell <= _cells); }
   body {
     import std.range: array;
     enum bool[_width] alignedOne = [(_width-1):1];
@@ -302,11 +326,10 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
       return true;
     }
   }
+
   /** Decrement the bucket **/
   private bool decrement (size_t cell) @safe pure nothrow
-  in {
-    assert (cell <= _cells);
-  }
+  in { assert (cell <= _cells); }
   body {
     import std.range;
     enum bool[_width] alignedComplement = true;
@@ -317,30 +340,30 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
       return false;
     }
     bool[] result;
+    // Decrementing is subtraction by -1 but we use the two complements way of
+    // subtracting bits.
+    // Inverting the subtrahend and adding 1 we get the two-complement. Adding
+    // this to the minuend gives us the difference of the subtraction.
     addition(getBucket(cell).array, alignedComplement, result);
     setBucket(cell, result);
     // we don't care about overflows
     return true;
   }
+
   /** Get bucket **/
   private auto getBucket (size_t cell) const pure nothrow @safe
-  in {
-    assert (cell <= _cells);
-  }
-  out (result) {
-    assert(result.length == _width);
-  }
+  in { assert (cell <= _cells); }
+  out (result) { assert(result.length == _width); }
   body {
     auto i = index(cell);
     import std.range: iota, array;
     import std.algorithm: map;
     return iota(i, i+_width).map!(a => storage.get(a)).array;
   }
+
   /** Set bucket **/
   private void setBucket (size_t cell, bool value) pure nothrow @safe @nogc
-  in {
-    assert (cell <= _cells);
-  }
+  in { assert (cell <= _cells); }
   body {
     import std.range: iota;
     import std.algorithm: each;
@@ -356,10 +379,6 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
     import std.range: iota;
     import std.algorithm: each;
     iota(0,_width).each!(a => storage.set(index(cell)+a,value[+a]));
-  }
-  unittest {
-    auto cf = new countingFilter!(10,4)(2, &md5, &murmur);
-    cf.setBucket(1, [0,1,1,1]);
   }
 } // end class countingFilter
 
@@ -379,6 +398,7 @@ unittest {
   cf.remove("eagle");
   assert(cf.query("eagle") == 1);
 }
+
 //final class spectralMIFilter : countingFilter {}
 
 //final class stableFilter : countingFilter {}

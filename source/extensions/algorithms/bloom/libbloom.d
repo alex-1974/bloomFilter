@@ -2,7 +2,17 @@
 module extensions.algorithms.bloom.libbloom;
 debug { import std.stdio; }
 
-/** Bits to decimal number **/
+/** Bits to decimal number
+ *
+ * Converts a bit array to a decimal number.
+ * It gets packed into a size_t which is mostly an ulong type.
+ * So the maximum value is size_t.max (64 bits). If the bit array exceeds
+ * this limit it will get silently limited.
+ *
+ * Params:
+ *  bits = bit array
+ * Returns: decimal number as size_t
+ **/
 size_t sumBits (bool[] bits) pure nothrow @safe @nogc {
   import std.algorithm: min;
   size_t numeral = 0;
@@ -22,11 +32,18 @@ unittest {
   bool[size_t.sizeof*8+1] bigger = true; // 65 bits all true
   assert(sumBits(big) == size_t.max);
   assert(sumBits(bigger) == size_t.max);
-
 }
+
 /** Bit addition
  *
- * Returns true if no overflow occured, otherwise false
+ * Gives the sum of a and b in bitwise addition. If a and b are of different length,
+ * the resulting bit array has the same size as the longer one.
+ * If on the leftmost place a carry remains we get an overflow and the function returns false.
+ * Params:
+ *  a = bit array a
+ *  b = bit array b
+ *  result = sum of a and b
+ * Returns: True if no overflow occured, otherwise false
  **/
 package bool addition (bool[] a, bool[] b, out bool[] result) pure nothrow @safe {
   import std.algorithm: max, swap;
@@ -46,6 +63,7 @@ package bool addition (bool[] a, bool[] b, out bool[] result) pure nothrow @safe
   }
   return !carry;
 }
+/** **/
 unittest {
   bool[] result;
   addition([0,1,0,1],[0,0,0,1], result);
@@ -54,6 +72,7 @@ unittest {
   assert(addition([0,0,0,1],[0,0,0,1], result) && result == [0,0,1,0]);
   assert(!addition([1,1,1,1],[0,0,0,1], result) && result == [0,0,0,0]);
 }
+/** diferent lengths of a and b **/
 unittest {
   bool[] result;
   assert(addition([0,1], [0,0,1,0], result) && result == [0,0,1,1]);
@@ -73,14 +92,16 @@ unittest {
   subtraction([0,0,1,1], [0,0,0,1], result);
   writefln ("result: %s", result);
 }
-/*******************
+
+/* *****************
 **    Raw math     *
 ********************
 * n: capacity (expected number of elements)
 * m: number of cells required
 * k: optimal number of hash functions
 * p: false-positive rate
-**/
+*/
+
 /** Number of bits in array needed **/
 package double _m (T) (T n, double p) pure nothrow @safe @nogc
 in {
