@@ -22,7 +22,7 @@ auto a2BloomFilter (size_t capacity, double fp) () {
   enum size_t requiredCells = numberOfBits(capacity, fp);
   enum size_t  optimalK = numberOfHashFunctions(capacity, requiredCells);
   writefln ("required cells %s optimal k %s", requiredCells, optimalK);
-  return new a2Filter!(capacity, requiredCells)(optimalK, &md5, &murmur);
+  return new a2Filter!(capacity, requiredCells,optimalK)(&md5, &murmur);
 }
 /** **/
 unittest {

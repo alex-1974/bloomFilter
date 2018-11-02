@@ -33,25 +33,20 @@ interface bloomFilter {
 }
 
 /** Standard bloom filter (SBF) **/
-final class basicFilter (size_t cells, engine e = engine.doubleHash) : bloomFilter {
+final class basicFilter (size_t cells, size_t k, engine e = engine.doubleHash) : bloomFilter {
   bitStorage!(cells) storage;
   const size_t _cells = cells;
   size_t size () const { return _cells; }
   alias hash = ubyte[] function (ubyte[]...);
-
+  hash[] hashes;
+  this(hash[] f...) { hashes ~= f; }
   static if (e == engine.singleHash) {
-    hash[] hashes;  // dynamic array
-    /** **/
-    this (hash[] f...) { hashes ~= f; }
-    mixin singleHashEngine;
+    mixin singleHash;
   }
   else static if (e == engine.doubleHash) {
-    hash[2] hashes; // static array
-    size_t _k;
-    /** **/
-    this (size_t k, hash f1, hash f2) { this._k = k; hashes = [f1,f2]; }
-    mixin doubleHashEngine!_k;
+    mixin doubleHash!k;
   }
+  else { static assert (0); }
 
   /** **/
   void add (T) (T value) {
@@ -68,12 +63,12 @@ final class basicFilter (size_t cells, engine e = engine.doubleHash) : bloomFilt
   /** **/
   override void clear () { storage.clear; }
 
-  size_t m (double fp, size_t capacity) { return size_t.init; }
-  size_t k (size_t cells, size_t capacity) { return size_t.init; }
+  //size_t m (double fp, size_t capacity) { return size_t.init; }
+  //size_t k (size_t cells, size_t capacity) { return size_t.init; }
 }
 /** **/
 unittest {
-  auto bf = new basicFilter!(25)(2, &md5, &murmur);
+  auto bf = new basicFilter!(25, 2)(&md5, &murmur);
   bf.add("cat");
   assert(bf.query("cat"));
   assert(!bf.query("dog"));
@@ -90,7 +85,7 @@ unittest {
  *  cells = The number of cells to use for Bloom filter
  *  e = The hash engine to use (default to double hashing)
  **/
-final class a2Filter (size_t capacity, size_t cells, engine e = engine.doubleHash) : bloomFilter {
+final class a2Filter (size_t capacity, size_t cells, size_t k, engine e = engine.doubleHash) : bloomFilter {
   const size_t _capacity = capacity;   // maximum number of items in the active bloom filter
   size_t _items = 0;                   // number of items in the active bloom filter
   const size_t _cells = cells;         // the number of cells for the Bloom filter
@@ -98,19 +93,13 @@ final class a2Filter (size_t capacity, size_t cells, engine e = engine.doubleHas
   bitStorage!(cells)[2] storage;  // the underlying storage as static array
   /** Get the size of the Bloom filter **/
   size_t size () const { return _cells; }
+  hash[] hashes;
+  this(hash[] f...) { hashes ~= f; }
   static if (e == engine.singleHash) {
-    hash[] hashes;  // dynamic array
-    /** **/
-    this (hash[] f...) { hashes ~= f; }
-    mixin singleHashEngine;
+    mixin singleHash;
   }
   else static if (e == engine.doubleHash) {
-    hash[2] hashes; // static array
-    size_t _k;
-    @property functions () const { return _k; }
-    /** **/
-    this (size_t k, hash f1, hash f2) { this._k = k; hashes = [f1,f2]; }
-    mixin doubleHashEngine!_k;
+    mixin doubleHash!k;
   }
   else { static assert (0); }
   invariant {
@@ -166,7 +155,7 @@ final class a2Filter (size_t capacity, size_t cells, engine e = engine.doubleHas
 /** **/
 unittest {
   // static hashes
-  auto a2 = new a2Filter!(10, 15)(6, &md5, &murmur);
+  auto a2 = new a2Filter!(10, 15, 6)(&md5, &murmur);
   assert (a2.size == 15);
   assert (a2.functions == 6);
   a2.add("cat");
@@ -176,7 +165,7 @@ unittest {
 /** **/
 unittest {
   // dynamic hashes
-  auto a2 = new a2Filter!(10, 15, engine.singleHash)(&md5, &murmur);
+  auto a2 = new a2Filter!(10, 15, 0, engine.singleHash)(&md5, &murmur);
   assert (a2.storage.length == 2 && a2.storage[0].array.length == 15);
   a2.add("lion");
   assert(a2.query("lion"));
@@ -184,12 +173,12 @@ unittest {
 }
 /** **/
 unittest {
-  auto a2 = new a2Filter!(10, 15)(6, &md5, &murmur);
+  auto a2 = new a2Filter!(10, 15, 6)(&md5, &murmur);
   a2.add("string");
   a2.add(42);
 }
 unittest {
-  auto a2 = new a2Filter!(10, 15)(6, &md5, &murmur);
+  auto a2 = new a2Filter!(10, 15, 6)(&md5, &murmur);
   a2.add(int(-2));
   a2.add(uint(3));
   a2.add(short(6));
@@ -216,7 +205,7 @@ unittest {
 unittest {
   import std.range: iota, tee, array;
   //import std.algorithm: tee;
-  auto a2 = new a2Filter!(10, 50)(6, &md5, &murmur);
+  auto a2 = new a2Filter!(10, 50, 6)(&md5, &murmur);
   iota(0,11).tee!(a => a2.add(a)).array;
   writefln ("storage 0: %s", a2.storage[0]);
   writefln ("storage 1: %s", a2.storage[1]);
@@ -237,7 +226,7 @@ unittest {
  *  width = size of the buckets
  *  e = hashing method (default to double hashing)
  ***/
-class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash): bloomFilter {
+class countingFilter (size_t cells, size_t width, size_t k, engine e = engine.doubleHash): bloomFilter {
   private enum size_t _cells = cells;           // the number of cells for the Bloom filter
   private enum size_t _width = width;           // the size of the buckets
   private enum size_t _length = _cells*_width;  // the total size of the filter
@@ -248,31 +237,15 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
   @property size_t size () const { return _cells; }
   /** Check if filter got compromised **/
   @property bool dirty () const { return _dirty; }
-  static if (e == engine.singleHash) {
-    hash[] hashes;  // dynamic array
-    /** Constructor
-     *
-     * Params:
-     *  f = list of hash functions
-     **/
-    this (hash[] f...) { hashes ~= f; }
-    mixin singleHashEngine;
+  hash[] hashes;
+  this (hash[] f...) {
+    hashes ~= f;
   }
-  else static if (e == engine.doubleHash) {
-    hash[2] hashes; // static array
-    size_t _k;    // number of hash functions
-    /** Return number of hash functions **/
-    @property functions () const { return _k; }
-    /** Constructor
-     *
-     * Params:
-     *  k = number of hash functions to generate
-     *  f1 = first hash function
-     *  f2 = second hash functions
-     **/
-    this (size_t k, hash f1, hash f2) { this._k = k; hashes = [f1,f2]; }
-    mixin doubleHashEngine!_k;
-  }
+
+  static if (e == engine.singleHash) { mixin singleHash; }
+  else static if (e == engine.doubleHash) { mixin doubleHash!k; }
+  else { static assert (0); }
+
   invariant {
     assert(_width < _cells, "Does it make sense if cells < width?");
     assert(0 < _length && _length < size_t.max, "Storage without length or storage bigger than the maximum of size_t!");  // we use size_t as index of the bitArray
@@ -428,7 +401,7 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
 
 /** **/
 unittest {
-  auto cf = new countingFilter!(10,4)(2, &md5, &murmur);
+  auto cf = new countingFilter!(10,4, 5)(&md5, &murmur);
   cf.add("butterfly");
   assert(cf.query("butterfly"));
   assert(!cf.query("dog"));
@@ -486,12 +459,13 @@ unittest {
   assert(a.get(0) == true && b.get(0) == false);
 }
 
+/** Conerts to ubyte array **/
 private auto toUbyte (T) (T[] value...) pure nothrow {
   import std.array;
   import std.algorithm;
   return value.map!(a => a.toUbyte).array;
 }
-/** **/
+/** ditto **/
 private auto toUbyte (T) (T value) pure nothrow  {
   import std.traits;
   static if (isArray!T) { return cast(ubyte[])value; }
@@ -507,12 +481,13 @@ unittest {
   auto sa = ["cat", "mouse"].toUbyte;
   auto sv = toUbyte("lion", "zebra");
 }
+
 /** Simple hashing
  *
  * Just feeds all given hash functions with the value and returns them as array
  * of decimal numbers.
  **/
-mixin template singleHashEngine () {
+mixin template singleHash () {
   /** Hash engine
    *
    * Params:
@@ -563,7 +538,9 @@ mixin template singleHashEngine () {
  * Params:
  *  k = Number of hashes
  **/
-mixin template doubleHashEngine (alias size_t k) {
+mixin template doubleHash (alias size_t k) {
+  /** Return number of hash functions **/
+  @property functions () const { return k; }
   /** Hash engine
    *
    * Params:
