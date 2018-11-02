@@ -13,17 +13,18 @@ enum engine {
 
 /** Interface for bloom filter (the base class) **/
 interface bloomFilter {
-  /** **/
+
+  /** Adding items to the filter **/
   void add (T) (T value);
-  /** **/
+  /** Query for items in the filter **/
   bool query (T) (T value);
-  /** **/
+  /** Clear the filter **/
   void clear ();
-  /** **/
+  /** Get the size of the filter **/
   size_t size ();
 }
 
-/** Basic bloom filter **/
+/** Standard bloom filter (SBF) **/
 final class basicFilter (size_t cells, engine e = engine.doubleHash) : bloomFilter {
   bitStorage!(cells) storage;
   const size_t _cells = cells;
@@ -109,12 +110,16 @@ final class a2Filter (size_t capacity, size_t cells, engine e = engine.doubleHas
     assert (storage[0].size == storage[1].size);
     //static assert (typeof(storage[0][0]) is typeof(bool));
   }
-  /** **/
+  /** Add a value to the filter
+   *
+   * Params:
+   *  value = List of values
+   **/
   void add (T) (T[] value...) {
     writefln ("add as T[] value... %s", value);
     foreach (v; value) { add(v); }
   }
-  /** **/
+  /** ditto **/
   void add (T) (T value) {
     import std.traits;
     import std.range: tee, array;
@@ -211,7 +216,19 @@ unittest {
 
 //final class spectralRMFilter : bloomFilter {}
 
-/** **/
+/** Counting bloom filter (CBF)
+ *
+ * The math is the same as with standard bloom filters. For a given amount of elements,
+ * we want to include, and a allowed false-positive-rate, we get the required number of cells
+ * we need and the optimal number of hash functions.
+ * The difference is in the width of each cell.
+ * SBF use just one bit to store the information. The CBF uses a fixed-width
+ * of bits (the bucket). This allows us to increment and decrement the bucket under certain conditions.
+ * Params:
+ *  cells = number of cells
+ *  width = size of the buckets
+ *  e = hashing method (default to double hashing)
+ ***/
 class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash): bloomFilter {
   private enum size_t _cells = cells;           // the number of cells for the Bloom filter
   private enum size_t _width = width;           // the size of the buckets
@@ -225,16 +242,26 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
   @property bool dirty () const { return _dirty; }
   static if (e == engine.singleHash) {
     hash[] hashes;  // dynamic array
-    /** **/
+    /** Constructor
+     *
+     * Params:
+     *  f = list of hash functions
+     **/
     this (hash[] f...) { hashes ~= f; }
     mixin singleHashEngine;
   }
   else static if (e == engine.doubleHash) {
     hash[2] hashes; // static array
-    size_t _k;
+    size_t _k;    // number of hash functions
     /** Return number of hash functions **/
     @property functions () const { return _k; }
-    /** **/
+    /** Constructor
+     *
+     * Params:
+     *  k = number of hash functions to generate
+     *  f1 = first hash function
+     *  f2 = second hash functions
+     **/
     this (size_t k, hash f1, hash f2) { this._k = k; hashes = [f1,f2]; }
     mixin doubleHashEngine!_k;
   }
@@ -246,10 +273,13 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
 
   /** Adding items to the filter
    *
-   * If a bucket value reaches 2<sup>w</sup>-1 it cannot be incremented further.
-   * This introduces undercounts with the probability of <em>false negative errors</em>.
+   * If a bucket value reaches
+   * <math display="inline"><msup><mn>2</mn><mi>w</mi></msup><mn>-1</mn></math>
+   * it cannot be incremented further.
+   * This introduces undercounts with the probability of <em>false negative errors</em>
+   * Params:
+   *  value = List of values
    **/
-   /** **/
   void add (T) (T[] value...) { foreach (v; value) { add(v); } }
   /** ditto **/
   void add (T) (T value) @system {
@@ -263,7 +293,10 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
    * As long as the filter is not <em>dirty</em> (no overflow occured yet) removing items is safe.
    * If the filter is dirty, removings introduce the possibility of <em>false negative errors</em>.
    **/
-  void remove (T) (T[] value...) { foreach (v; value) { remove(v); } }
+  void remove (T) (T[] value...) @system {
+    import std.algorithm: each;
+    value.each!(a => remove(a));
+  }
   /** ditto **/
   void remove (T) (T value) @system {
     import std.range;
@@ -278,10 +311,10 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
   /** Query the item
    *
    * Check if the term is within the filter.
-   * If more than ne term is searched for returns the minimum of all terms.
+   * If more than one term is searched for returns the minimum of all terms.
    * Returns the minimum value as frequency estimate (known as minimum selection)
    **/
-  size_t[] query (T) (T[] value...) {
+  size_t query (T) (T[] value...) {
     import std.algorithm: minElement, map;
     return value.map!(a => query(a)).minElement;
    }
@@ -300,28 +333,30 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
   /** Gives the index of the first bit in the bucket **/
   private size_t index (size_t cell) const pure nothrow @safe @nogc
   in { assert (cell <= _cells); }
+  out (result) { assert(result <= _length-(_width - 1), "Index violation!"); }
   body { return cell * _width; }
 
   /** Sums up the bits in the bucket **/
   private size_t count (size_t cell) pure nothrow @safe
   in { assert (cell <= _cells); }
+  out (result) { assert(0 <= result && result <= (2^_width) - 1, "Bucket out of bounds!"); }
   body { return sumBits(getBucket(cell)); }
 
   /** Increment the bucket **/
   private bool increment (size_t cell) @safe pure nothrow
   in { assert (cell <= _cells); }
+  out { assert(0 < count(cell) && count(cell) <= (2^_width) - 1, "Bucket out of bounds!"); }
   body {
-    import std.range: array;
-    enum bool[_width] alignedOne = [(_width-1):1];
-    enum bool[_width] alignedFull = true;
-    if (getBucket(cell).array == alignedFull) {
+    enum bool[_width] alignedOne = [(_width-1):1];  // e.g. 0001
+    enum bool[_width] alignedFull = true;           // e.g. 1111
+    if (getBucket(cell) == alignedFull) {
       // just a shortcut if bucket is already full
       _dirty = true;
       return false;
     }
     else {
       bool[] result;
-      addition(getBucket(cell).array, alignedOne, result);
+      addition(getBucket(cell), alignedOne, result);
       setBucket(cell,result);
       return true;
     }
@@ -330,12 +365,13 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
   /** Decrement the bucket **/
   private bool decrement (size_t cell) @safe pure nothrow
   in { assert (cell <= _cells); }
+  out { assert(0 <= count(cell) && count(cell) < (2^_width) - 1, "Bucket out of bounds!"); }
   body {
     import std.range;
-    enum bool[_width] alignedComplement = true;
-    enum bool[_width] alignedEmpty = false;
+    enum bool[_width] alignedComplement = true;   // e.g. 1111 (the complement of 0001)
+    enum bool[_width] alignedEmpty = false;       // e.g. 0000
     // shortcut if bucket is already empty
-    if (getBucket(cell).array == alignedEmpty) {
+    if (getBucket(cell) == alignedEmpty) {
       _dirty = true;
       return false;
     }
@@ -344,7 +380,7 @@ class countingFilter (size_t cells, size_t width, engine e = engine.doubleHash):
     // subtracting bits.
     // Inverting the subtrahend and adding 1 we get the two-complement. Adding
     // this to the minuend gives us the difference of the subtraction.
-    addition(getBucket(cell).array, alignedComplement, result);
+    addition(getBucket(cell), alignedComplement, result);
     setBucket(cell, result);
     // we don't care about overflows
     return true;
@@ -463,9 +499,18 @@ unittest {
   auto sa = ["cat", "mouse"].toUbyte;
   auto sv = toUbyte("lion", "zebra");
 }
-/** **/
+/** Simple hashing
+ *
+ * Get the hashes of the value for the given hash functions and converts them
+ * to decimal numbers.
+ **/
 mixin template singleHashEngine () {
-  /** **/
+  /** Hash engine
+   *
+   * Params:
+   *  value = List of values as ubyte arrays
+   * Returns: Array of decimal numbers
+   **/
   private size_t[] hashEngine (ubyte[] value...) @system
   body {
     import std.range: iota, array;
@@ -474,9 +519,41 @@ mixin template singleHashEngine () {
   }
 }
 
-/** **/
+/** Double-hashing
+ *
+ * Given two hash functions (<em>h<sub>1</sub>, h<sub>2</sub></em>) and the value
+ * (<em>v</em>) we combine them <em>i</em>-times to get the required number
+ * of hash values.
+ * <math display="block" href="https://en.wikipedia.org/wiki/Double_hashing">
+ *  <mrow>
+ *   <mi>h</mi><mfenced><mi>i</mi><mi>v</mi></mfenced><mo>=</mo>
+ *   <mo>(</mo><msub><mi>h</mi><mn>1</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo><mo>+</mo>
+ *   <mi>i</mi><mo>&sdot;</mo><msub><mi>h</mi><mn>2</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo>
+ *   <mo>)</mo><mspace width="0.6em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo>
+ *  </mrow>
+ * </math>
+ * We convert each hash value from the hash functions, h(v), to a decimal number to get an index.
+ * <math display="block">
+ *   <msub><mi>h</mi><mn>1</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo><mo>=</mo><mn>24</mn><mspace width="1em" />
+ *   <msub><mi>h</mi><mn>2</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo><mo>=</mo><mn>16</mn><mspace width="1em" />
+ *   <mi>i</mi><mo>=</mo><mn>4</mn><mspace width="1em" />
+ *   <mi>T</mi><mo>=</mo><mn>55</mn>
+ * </math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>0</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>24</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>24</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>1</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>40</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>40</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>2</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>56</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>1</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>3</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>72</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>17</mn></math>
+ * </math>
+ * Params:
+ *  k = Number of hashes
+ **/
 mixin template doubleHashEngine (alias size_t k) {
-  /** **/
+  /** Hash engine
+   *
+   * Params:
+   *  value = List of values as ubyte arrays
+   * Returns: Array of decimal numbers
+   **/
   private size_t[] hashEngine (ubyte[] value...) @system {
     import std.range: iota, array;
     import std.algorithm: map;

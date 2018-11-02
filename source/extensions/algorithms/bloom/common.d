@@ -19,7 +19,7 @@ auto a2BloomFilter (size_t capacity, double fp) () {
 }
 /** **/
 unittest {
-  //auto a2 = a2BloomFilter!(10, 0.01);
+  auto a2 = a2BloomFilter!(1000, 0.01);
 }
 
 /** **/
