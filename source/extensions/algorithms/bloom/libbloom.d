@@ -1,4 +1,12 @@
-/** **/
+/** Library contains math and helper functions
+*
+* Authors: Alexander Leisser, (alex.leisser@gmail.com)
+* Version: 1.0alpha
+* History:
+*  1.0alpha initial version
+* Copyright: Alexander Leisser
+* License: <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a>
+**/
 module extensions.algorithms.bloom.libbloom;
 debug { import std.stdio; }
 

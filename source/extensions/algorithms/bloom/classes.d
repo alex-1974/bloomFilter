@@ -1,4 +1,12 @@
-/** **/
+/** Contains the bloom filter class hierachy
+*
+* Authors: Alexander Leisser, (alex.leisser@gmail.com)
+* Version: 1.0alpha
+* History:
+*  1.0alpha initial version
+* Copyright: Alexander Leisser
+* License: <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a>
+**/
 module extensions.algorithms.bloom.classes;
 
 import std.range: InputRange;
@@ -501,8 +509,8 @@ unittest {
 }
 /** Simple hashing
  *
- * Get the hashes of the value for the given hash functions and converts them
- * to decimal numbers.
+ * Just feeds all given hash functions with the value and returns them as array
+ * of decimal numbers.
  **/
 mixin template singleHashEngine () {
   /** Hash engine
@@ -519,11 +527,14 @@ mixin template singleHashEngine () {
   }
 }
 
-/** Double-hashing
+/** Double-hashing algorithm
+ *
+ * Bloom filters require multiple hash functions (hash values), which for practical purposes we don't have.
+ * Double hashing just needs two hash functions and combine them to get the required number of hash values.
  *
  * Given two hash functions (<em>h<sub>1</sub>, h<sub>2</sub></em>) and the value
  * (<em>v</em>) we combine them <em>i</em>-times to get the required number
- * of hash values.
+ * of hash values. To stay within the bounds of our storage we take the modulo with the storage size.
  * <math display="block" href="https://en.wikipedia.org/wiki/Double_hashing">
  *  <mrow>
  *   <mi>h</mi><mfenced><mi>i</mi><mi>v</mi></mfenced><mo>=</mo>
@@ -533,16 +544,21 @@ mixin template singleHashEngine () {
  *  </mrow>
  * </math>
  * We convert each hash value from the hash functions, h(v), to a decimal number to get an index.
+ * It is possible for the hash functions to return zero. That doesn't matter for the first hash function, <em>h<sub>1</sub>(v)</em>, as we will still get different values.
+ * But if the second hash function, <em>h<sub>2</sub>(v)</em>, evaluates to zero, the resulting sequence will always remain at the value of <em>h<sub>1</sub>(v)</em>.
+ * One possible solution is to change the second function to
+ * <math display="inline"><mi>i</mi><mo>&sdot;</mo><msub><mi>h</mi><mn>2</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo><mo>+</mo><mn>1</mn></math>.
+ * <h3>Example</h3>
  * <math display="block">
  *   <msub><mi>h</mi><mn>1</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo><mo>=</mo><mn>24</mn><mspace width="1em" />
  *   <msub><mi>h</mi><mn>2</mn></msub><mo>(</mo><mi>v</mi><mo>)</mo><mo>=</mo><mn>16</mn><mspace width="1em" />
  *   <mi>i</mi><mo>=</mo><mn>4</mn><mspace width="1em" />
  *   <mi>T</mi><mo>=</mo><mn>55</mn>
  * </math>
- * <math display="block"><mi>i</mi><mo>:</mo><mn>0</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>24</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>24</mn></math>
- * <math display="block"><mi>i</mi><mo>:</mo><mn>1</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>40</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>40</mn></math>
- * <math display="block"><mi>i</mi><mo>:</mo><mn>2</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>56</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>1</mn></math>
- * <math display="block"><mi>i</mi><mo>:</mo><mn>3</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mi>i</mi><mo>&sdot;</mo><mn>16</mn><mo>=</mo><mn>72</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mo>|T|</mo><mo>=</mo><mn>17</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>0</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mo>(</mo><mn>0</mn><mo>&sdot;</mo><mn>16</mn><mo>+</mo><mn>1</mn><mo>)</mo><mo>=</mo><mn>25</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mn>55</mn><mo>=</mo><mn>25</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>1</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mo>(</mo><mn>1</mn><mo>&sdot;</mo><mn>16</mn><mo>+</mo><mn>1</mn><mo>)</mo><mo>=</mo><mn>41</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mn>55</mn><mo>=</mo><mn>41</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>2</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mo>(</mo><mn>2</mn><mo>&sdot;</mo><mn>16</mn><mo>+</mo><mn>1</mn><mo>)</mo><mo>=</mo><mn>57</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mn>55</mn><mo>=</mo><mn>2</mn></math>
+ * <math display="block"><mi>i</mi><mo>:</mo><mn>3</mn><mspace width="1em" /><mn>24</mn><mo>+</mo><mo>(</mo><mn>3</mn><mo>&sdot;</mo><mn>16</mn><mo>+</mo><mn>1</mn><mo>)</mo><mo>=</mo><mn>73</mn><mspace width="1em" /><mo>mod</mo><mspace width="0.3em" /><mn>55</mn><mo>=</mo><mn>18</mn></math>
  * </math>
  * Params:
  *  k = Number of hashes
@@ -559,6 +575,6 @@ mixin template doubleHashEngine (alias size_t k) {
     import std.algorithm: map;
     const auto h1 = hashes[0](value).bitsToNumber;
     const auto h2 = hashes[1](value).bitsToNumber;
-    return iota(0,k).map!(a => (h1 + a * h2) % size).array;
+    return iota(0,k).map!(a => (h1 + (a * h2 + 1)) % size).array;
   }
 }
