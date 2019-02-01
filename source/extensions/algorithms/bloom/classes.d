@@ -550,8 +550,11 @@ mixin template doubleHash (alias size_t k) {
   private size_t[] hashEngine (ubyte[] value...) @system {
     import std.range: iota, array;
     import std.algorithm: map;
-    const auto h1 = hashes[0](value).bitsToNumber;
-    const auto h2 = hashes[1](value).bitsToNumber;
+    import extensions.conv: bytesToDec;
+    //const auto h1 = hashes[0](value).bitsToNumber;
+    const auto h1 = hashes[0](value).bytesToDec!(ubyte, ulong);
+    //const auto h2 = hashes[1](value).bitsToNumber;
+    const auto h2 = hashes[1](value).bytesToDec!(ubyte, ulong);
     return iota(0,k).map!(a => (h1 + (a * h2 + 1)) % size).array;
   }
 }
