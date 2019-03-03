@@ -1,7 +1,28 @@
+<<<<<<< HEAD
+=======
+# Compiled Object files
+*.o
+*.obj
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+
+# Executables
+*.exe
+
+# DUB
+>>>>>>> edd439e2b98fefa50158d0f4c3ea1a953d7cbb1d
 .dub
 docs.json
 __dummy.html
 docs/
+<<<<<<< HEAD
 /bloomfilter
 bloomfilter.so
 bloomfilter.dylib
@@ -12,4 +33,8 @@ bloomfilter-test-*
 *.exe
 *.o
 *.obj
+=======
+
+# Code coverage
+>>>>>>> edd439e2b98fefa50158d0f4c3ea1a953d7cbb1d
 *.lst
