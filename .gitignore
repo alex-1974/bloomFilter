@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/bloomfilter
+bloomfilter.so
+bloomfilter.dylib
+bloomfilter.dll
+bloomfilter.a
+bloomfilter.lib
+bloomfilter-test-*
+*.exe
+*.o
+*.obj
+*.lst

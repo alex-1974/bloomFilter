@@ -1,0 +1,5 @@
+name "bloomfilter"
+description "A minimal D application."
+authors "Alexander Leisser"
+copyright "Copyright © 2019, Alexander Leisser"
+license "proprietary"
