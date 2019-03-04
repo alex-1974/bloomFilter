@@ -1,5 +1,13 @@
-<<<<<<< HEAD
-=======
+# DUB
+.dub
+docs.json
+__dummy.html
+docs/
+bloomfilter-test-*
+
+# Code coverage
+*.lst
+
 # Compiled Object files
 *.o
 *.obj
@@ -15,26 +23,3 @@
 
 # Executables
 *.exe
-
-# DUB
->>>>>>> edd439e2b98fefa50158d0f4c3ea1a953d7cbb1d
-.dub
-docs.json
-__dummy.html
-docs/
-<<<<<<< HEAD
-/bloomfilter
-bloomfilter.so
-bloomfilter.dylib
-bloomfilter.dll
-bloomfilter.a
-bloomfilter.lib
-bloomfilter-test-*
-*.exe
-*.o
-*.obj
-=======
-
-# Code coverage
->>>>>>> edd439e2b98fefa50158d0f4c3ea1a953d7cbb1d
-*.lst
